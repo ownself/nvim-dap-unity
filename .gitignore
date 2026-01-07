@@ -1,0 +1,21 @@
+# Universal
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+*.swo
+*.bak
+*.log
+.env*
+.vscode/
+.idea/
+
+# Node (repo tooling)
+node_modules/
+dist/
+build/
+coverage/
+.opencode/node_modules/
+
+# Neovim docs
+/doc/tags
