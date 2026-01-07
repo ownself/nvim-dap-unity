@@ -1,5 +1,7 @@
 # nvim-dap-unity
 
+![nvim-dap-unity](nvim-dap-unity.png)
+
 ## English
 
 ### Overview
@@ -47,16 +49,11 @@ return {
     {
       "ownself/nvim-dap-unity",
       build = function()
+        -- make sure adapter to be installed properly
         require("nvim-dap-unity").install()
       end,
-      opts = {
-        auto_install_on_start = false,
-      },
     },
   },
-  config = function()
-    require("dapui").setup()
-  end,
 }
 ```
 
@@ -152,14 +149,8 @@ return {
       build = function()
         require("nvim-dap-unity").install()
       end,
-      opts = {
-        auto_install_on_start = false,
-      },
     },
   },
-  config = function()
-    require("dapui").setup()
-  end,
 }
 ```
 
