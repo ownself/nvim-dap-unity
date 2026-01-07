@@ -82,11 +82,9 @@ function M.ensure_adapter(status)
 		return false, "nvim-dap not available"
 	end
 
-	if dap.adapters and dap.adapters.unity then
-		return true
-	end
-	if dap.adapters and dap.adapters.vstuc then
-		dap.adapters.unity = dap.adapters.vstuc
+	dap.adapters = ensure_table(dap.adapters)
+
+	if dap.adapters.unity then
 		return true
 	end
 
@@ -98,7 +96,6 @@ function M.ensure_adapter(status)
 		return false, "dotnet not found in PATH"
 	end
 
-	dap.adapters = ensure_table(dap.adapters)
 	dap.adapters.unity = {
 		type = "executable",
 		command = "dotnet",
