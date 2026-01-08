@@ -6,9 +6,10 @@
 
 ### Overview
 
-`nvim-dap-unity` is a Neovim plugin that:
+`nvim-dap-unity` is a Neovim plugin that essentially helping setting up debugging environment for Unity
 
-- Downloads and installs Unity’s `vstuc` debug adapter (VSIX/vspackage) into your Neovim data directory.
+- Under the hook, it uses [VSCode unity plugin](https://marketplace.visualstudio.com/items?itemName=visualstudiotoolsforunity.vstuc) for doing the DAP stuff
+- Automatically downloads and installs Unity’s `vstuc` debug adapter (VSIX/vspackage) into your Neovim data directory.
 - Integrates with `mfussenegger/nvim-dap` by injecting:
   - `dap.adapters.unity` (only if you didn’t define it yourself)
   - a default `dap.configurations.cs` entry for “Attach to Unity” (merge-friendly)
@@ -54,6 +55,16 @@ return {
       end,
     },
   },
+  config = function()
+    dap.configurations.cs = dap.configurations.cs or {}
+    -- Just incase of "Attach to Unity" being overwritten
+    vim.list_extend(dap.configurations.cs, {
+        -- your dotnet configurations...
+        {
+            -- ...
+        },
+    })
+  end,
 }
 ```
 
@@ -104,8 +115,9 @@ require("nvim-dap-unity").setup({
 
 ### 简介
 
-`nvim-dap-unity` 是一个 Neovim 插件，用于：
+`nvim-dap-unity` 是一个 Neovim 插件，用于快捷的为Neovim设置好可用于Unity的DAP调试环境
 
+- 后台依靠 [VSCode unity plugin](https://marketplace.visualstudio.com/items?itemName=visualstudiotoolsforunity.vstuc) 来实现DAP协议
 - 自动下载并安装 Unity 的 `vstuc` 调试适配器（VSIX/vspackage），安装到 Neovim 的 data 目录下。
 - 与 `mfussenegger/nvim-dap` 集成：
   - 注入 `dap.adapters.unity`（仅当用户未自定义时）
@@ -151,6 +163,16 @@ return {
       end,
     },
   },
+  config = function()
+    dap.configurations.cs = dap.configurations.cs or {}
+    -- Just incase of "Attach to Unity" being overwritten
+    vim.list_extend(dap.configurations.cs, {
+        -- your dotnet configurations...
+        {
+            -- ...
+        },
+    })
+  end,
 }
 ```
 
