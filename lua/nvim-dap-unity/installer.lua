@@ -188,7 +188,8 @@ local function download_file(url, out_path)
 		return nil, make_error("missing_tool", "download", "curl not found", "please install curl", "")
 	end
 
-	local r = util.system({ "sh", "-lc", ("curl -fL --retry 2 --retry-delay 1 -o %q %q"):format(out_path, url) }, {
+	-- Use --compressed to automatically decompress gzip/deflate responses from VS Marketplace
+	local r = util.system({ "sh", "-lc", ("curl -fL --compressed --retry 2 --retry-delay 1 -o %q %q"):format(out_path, url) }, {
 		timeout = 120000,
 	})
 	if r.code ~= 0 then
