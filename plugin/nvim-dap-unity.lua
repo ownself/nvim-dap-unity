@@ -1,18 +1,13 @@
-local ok, unity = pcall(require, "nvim-dap-unity")
-if not ok then
-	return
-end
-
 vim.api.nvim_create_user_command("NvimDapUnityInstall", function()
-	unity.install()
+	require("nvim-dap-unity").install()
 end, {})
 
 vim.api.nvim_create_user_command("NvimDapUnityUpdate", function()
-	unity.update()
+	require("nvim-dap-unity").update()
 end, {})
 
 vim.api.nvim_create_user_command("NvimDapUnityStatus", function()
-	local s = unity.status()
+	local s = require("nvim-dap-unity").status()
 	local lines = {
 		("installed: %s"):format(tostring(s.installed)),
 		("install_dir: %s"):format(tostring(s.install_dir)),
