@@ -153,28 +153,31 @@ function M.add_default_cs_configuration(status)
 			return find_unity_project_root()
 		end,
 		endPoint = function()
-			if not has_probe then
-				vim.notify(
-					("nvim-dap-unity: %s not found; please set dap.configurations.cs[].endPoint manually"):format(
-						"UnityAttachProbe.dll"
-					),
-					vim.log.levels.WARN
-				)
-				return ""
+			local endpoint = ""
+
+			-- Try UnityAttachProbe first (works on Windows/macOS)
+			if has_probe then
+				local r = util.system({ "dotnet", probe_path }, { timeout = 2000 })
+				if r.code == 0 then
+					endpoint = parse_probe_stdout(r.stdout)
+				end
 			end
 
-			local r = util.system({ "dotnet", probe_path }, { timeout = 2000 })
-			if r.code ~= 0 then
-				vim.notify(
-					("nvim-dap-unity: UnityAttachProbe failed: %s"):format(r.stderr ~= "" and r.stderr or r.stdout),
-					vim.log.levels.WARN
-				)
-				return ""
+			-- Fallback: scan ports on Linux if UnityAttachProbe didn't find anything
+			if endpoint == "" and not util.is_windows() then
+				endpoint = util.find_unity_endpoint_linux()
 			end
 
-			local endpoint = parse_probe_stdout(r.stdout)
 			if endpoint == "" then
-				vim.notify("nvim-dap-unity: No endpoint found (is Unity running?)", vim.log.levels.WARN)
+				if not has_probe then
+					vim.notify(
+						"nvim-dap-unity: UnityAttachProbe.dll not found and no Unity instance detected. "
+							.. "Please set dap.configurations.cs[].endPoint manually.",
+						vim.log.levels.WARN
+					)
+				else
+					vim.notify("nvim-dap-unity: No endpoint found (is Unity running?)", vim.log.levels.WARN)
+				end
 			end
 			return endpoint
 		end,
