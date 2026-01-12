@@ -10,6 +10,7 @@
 
 - Under the hook, it uses [VSCode unity plugin](https://marketplace.visualstudio.com/items?itemName=visualstudiotoolsforunity.vstuc) for doing the DAP stuff
 - Automatically downloads and installs Unity’s `vstuc` debug adapter (VSIX/vspackage) into your Neovim data directory.
+- Automatically search and load neccessary dll under the project folder
 - Integrates with `mfussenegger/nvim-dap` by injecting:
   - `dap.adapters.unity` (only if you didn’t define it yourself)
   - a default `dap.configurations.cs` entry for “Attach to Unity” (merge-friendly)
@@ -109,6 +110,10 @@ require("nvim-dap-unity").setup({
 - `:NvimDapUnityUpdate` — Force reinstall/update
 - `:NvimDapUnityStatus` — Show status, paths, and dependency checks
 
+### Test
+
+Plugin has been tested on Windows, MacOS, and even Linux(Installing Unity in Arch Linux indeed costs lots of time...)
+
 ---
 
 ## 中文
@@ -119,6 +124,7 @@ require("nvim-dap-unity").setup({
 
 - 后台依靠 [VSCode unity plugin](https://marketplace.visualstudio.com/items?itemName=visualstudiotoolsforunity.vstuc) 来实现DAP协议
 - 自动下载并安装 Unity 的 `vstuc` 调试适配器（VSIX/vspackage），安装到 Neovim 的 data 目录下。
+- 启动时自动搜索并加载工程目录中所需的dll文件
 - 与 `mfussenegger/nvim-dap` 集成：
   - 注入 `dap.adapters.unity`（仅当用户未自定义时）
   - 以“合并、不覆盖”的方式向 `dap.configurations.cs` 追加 `Attach to Unity` 配置
@@ -216,3 +222,7 @@ require("nvim-dap-unity").setup({
 - `:NvimDapUnityInstall`：安装/修复适配器
 - `:NvimDapUnityUpdate`：强制重装/更新
 - `:NvimDapUnityStatus`：查看安装状态、关键路径与依赖检查
+
+### 测试
+
+插件已经在Windows、MacOS、甚至是Linux系统（是的，安装Linux下的Unity花费了我不少时间）完成测试
