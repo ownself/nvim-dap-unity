@@ -114,6 +114,10 @@ require("nvim-dap-unity").setup({
 
 Plugin has been tested on Windows, MacOS, and even Linux(Installing Unity in Arch Linux indeed costs lots of time...)
 
+### Bonus
+
+I wrote a blog post about [how I setup Neovim for Unity Development](https://www.ownself.org/2025/setup-neovim-for-unity-development.html)
+
 ---
 
 ## 中文
@@ -226,3 +230,7 @@ require("nvim-dap-unity").setup({
 ### 测试
 
 插件已经在Windows、MacOS、甚至是Linux系统（是的，安装Linux下的Unity花费了我不少时间）完成测试
+
+### 奖励
+
+我简单写了一篇博客介绍[我如何配置Neovim来进行Unity项目开发](https://www.ownself.org/2025/setup-neovim-for-unity-development.html)，中文版在后半部分
