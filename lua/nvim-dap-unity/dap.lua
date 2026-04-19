@@ -2,6 +2,10 @@ local util = require("nvim-dap-unity.util")
 
 local M = {}
 
+-- dotnet cold start (NGEN/JIT, file cache miss) can take 3–5s. Keep this loose
+-- enough to cover that on a fresh boot; warm runs typically finish in <500ms.
+local PROBE_TIMEOUT_MS = 8000
+
 local function get_dap()
 	local ok, dap = pcall(require, "dap")
 	if not ok then
@@ -74,6 +78,30 @@ local function parse_probe_stdout(stdout)
 	end
 
 	return ""
+end
+
+-- Run UnityAttachProbe.dll. Yields if called from a coroutine (nvim-dap evaluates
+-- configuration values inside one), so the UI is not frozen while we wait.
+-- Returns (endpoint, nil) on success, (nil, system_result) on failure.
+local function probe_endpoint(probe_path)
+	local co = coroutine.running()
+	local res
+	if co then
+		util.system_async({ "dotnet", probe_path }, { timeout = PROBE_TIMEOUT_MS }, function(r)
+			coroutine.resume(co, r)
+		end)
+		res = coroutine.yield()
+	else
+		res = util.system({ "dotnet", probe_path }, { timeout = PROBE_TIMEOUT_MS })
+	end
+	if res.code ~= 0 then
+		return nil, res
+	end
+	local endpoint = parse_probe_stdout(res.stdout)
+	if endpoint == "" then
+		return nil, res
+	end
+	return endpoint
 end
 
 function M.ensure_adapter(status)
@@ -153,33 +181,43 @@ function M.add_default_cs_configuration(status)
 			return find_unity_project_root()
 		end,
 		endPoint = function()
-			local endpoint = ""
+			local endpoint, probe_err
 
-			-- Try UnityAttachProbe first (works on Windows/macOS)
+			-- Try UnityAttachProbe first (works on Windows/macOS, and on Linux when
+			-- the probe binary is present). Runs async via coroutine yield, so the
+			-- UI stays responsive while dotnet warms up.
 			if has_probe then
-				local r = util.system({ "dotnet", probe_path }, { timeout = 2000 })
-				if r.code == 0 then
-					endpoint = parse_probe_stdout(r.stdout)
+				endpoint, probe_err = probe_endpoint(probe_path)
+			end
+
+			-- Fallback: scan listening ports on Linux when probe didn't yield a hit.
+			if not endpoint and not util.is_windows() then
+				local linux_ep = util.find_unity_endpoint_linux()
+				if linux_ep ~= "" then
+					endpoint = linux_ep
 				end
 			end
 
-			-- Fallback: scan ports on Linux if UnityAttachProbe didn't find anything
-			if endpoint == "" and not util.is_windows() then
-				endpoint = util.find_unity_endpoint_linux()
+			if endpoint then
+				return endpoint
 			end
 
-			if endpoint == "" then
-				if not has_probe then
-					vim.notify(
-						"nvim-dap-unity: UnityAttachProbe.dll not found and no Unity instance detected. "
-							.. "Please set dap.configurations.cs[].endPoint manually.",
-						vim.log.levels.WARN
-					)
-				else
-					vim.notify("nvim-dap-unity: No endpoint found (is Unity running?)", vim.log.levels.WARN)
+			-- Surface a clear error to the user instead of returning an empty string,
+			-- which would otherwise let nvim-dap try to connect to a bogus address
+			-- and produce a confusing low-level failure.
+			local msg
+			if not has_probe then
+				msg = "nvim-dap-unity: UnityAttachProbe.dll not found. Run :NvimDapUnityInstall, "
+					.. "or set this configuration's `endPoint` manually."
+			else
+				msg = "nvim-dap-unity: No Unity instance detected. "
+					.. "Make sure Unity Editor is running with this project open."
+				if probe_err and probe_err.stderr and probe_err.stderr ~= "" then
+					msg = msg .. " (probe: " .. vim.trim(probe_err.stderr) .. ")"
 				end
 			end
-			return endpoint
+			vim.notify(msg, vim.log.levels.ERROR)
+			error(msg, 0)
 		end,
 	}
 
