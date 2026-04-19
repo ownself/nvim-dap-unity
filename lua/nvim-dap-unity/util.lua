@@ -56,6 +56,35 @@ function M.system(cmd, opts)
 	return normalize_system_output(result)
 end
 
+--- Async variant of M.system. Invokes on_exit(result) on the main loop.
+--- Result has the same shape as M.system: { code, stdout, stderr }.
+function M.system_async(cmd, opts, on_exit)
+	opts = opts or {}
+	opts.text = true
+
+	return vim.system(cmd, opts, function(result)
+		local normalized = normalize_system_output(result)
+		vim.schedule(function()
+			on_exit(normalized)
+		end)
+	end)
+end
+
+--- Coroutine-friendly wrapper around system_async. Must be called from a
+--- running coroutine; yields until the process exits, then returns the result.
+function M.await_system(cmd, opts)
+	local co = coroutine.running()
+	assert(co, "util.await_system must be called from inside a coroutine")
+
+	M.system_async(cmd, opts, function(res)
+		local ok, err = coroutine.resume(co, res)
+		if not ok then
+			vim.notify("nvim-dap-unity: coroutine error: " .. tostring(err), vim.log.levels.ERROR)
+		end
+	end)
+	return coroutine.yield()
+end
+
 function M.json_decode(text)
 	return vim.json.decode(text)
 end

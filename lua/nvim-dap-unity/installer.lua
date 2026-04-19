@@ -155,6 +155,7 @@ local function bin_dir_from_files(files)
 end
 
 local function tool_exists(cmd)
+	-- Sync — only used during pre-flight inside coroutine; fast (where/command -v).
 	if util.is_windows() then
 		local r = util.system({ "where", cmd }, { timeout = 2000 })
 		return r.code == 0 and r.stdout ~= ""
@@ -163,7 +164,7 @@ local function tool_exists(cmd)
 	return r.code == 0
 end
 
-local function download_file(url, out_path)
+local function await_download_file(url, out_path)
 	ensure_dir(vim.fs.dirname(out_path))
 
 	if util.is_windows() then
@@ -171,7 +172,7 @@ local function download_file(url, out_path)
 			"$ErrorActionPreference = 'Stop'",
 			("Invoke-WebRequest -Uri '%s' -OutFile '%s'"):format(url, out_path:gsub("'", "''")),
 		}, "; ")
-		local r = util.system({ "powershell", "-NoProfile", "-Command", ps }, { timeout = 120000 })
+		local r = util.await_system({ "powershell", "-NoProfile", "-Command", ps }, { timeout = 120000 })
 		if r.code ~= 0 then
 			return nil, make_error(
 				"download_failed",
@@ -189,7 +190,7 @@ local function download_file(url, out_path)
 	end
 
 	-- Use --compressed to automatically decompress gzip/deflate responses from VS Marketplace
-	local r = util.system({ "sh", "-lc", ("curl -fL --compressed --retry 2 --retry-delay 1 -o %q %q"):format(out_path, url) }, {
+	local r = util.await_system({ "sh", "-lc", ("curl -fL --compressed --retry 2 --retry-delay 1 -o %q %q"):format(out_path, url) }, {
 		timeout = 120000,
 	})
 	if r.code ~= 0 then
@@ -205,7 +206,7 @@ local function download_file(url, out_path)
 	return out_path
 end
 
-local function unzip_package(zip_path, out_dir)
+local function await_unzip_package(zip_path, out_dir)
 	ensure_dir(out_dir)
 
 	if util.is_windows() then
@@ -213,7 +214,7 @@ local function unzip_package(zip_path, out_dir)
 			"$ErrorActionPreference = 'Stop'",
 			("Expand-Archive -Path '%s' -DestinationPath '%s' -Force"):format(zip_path:gsub("'", "''"), out_dir:gsub("'", "''")),
 		}, "; ")
-		local r = util.system({ "powershell", "-NoProfile", "-Command", ps }, { timeout = 120000 })
+		local r = util.await_system({ "powershell", "-NoProfile", "-Command", ps }, { timeout = 120000 })
 		if r.code ~= 0 then
 			return nil, make_error(
 				"unzip_failed",
@@ -231,7 +232,7 @@ local function unzip_package(zip_path, out_dir)
 		return nil, make_error("missing_tool", "unzip", "unzip not found", "please install unzip", "")
 	end
 
-	local r = util.system({ "sh", "-lc", ("unzip -o %q -d %q"):format(zip_path, out_dir) }, { timeout = 120000 })
+	local r = util.await_system({ "sh", "-lc", ("unzip -o %q -d %q"):format(zip_path, out_dir) }, { timeout = 120000 })
 	if r.code ~= 0 then
 		return nil, make_error(
 			"unzip_failed",
@@ -245,23 +246,23 @@ local function unzip_package(zip_path, out_dir)
 	return out_dir
 end
 
-local function rm_rf(path)
+local function await_rm_rf(path)
 	if not path or path == "" then
 		return
 	end
 	if util.is_windows() then
-		util.system({ "powershell", "-NoProfile", "-Command", ("Remove-Item -LiteralPath '%s' -Recurse -Force -ErrorAction SilentlyContinue"):format(path:gsub("'", "''")) }, {
+		util.await_system({ "powershell", "-NoProfile", "-Command", ("Remove-Item -LiteralPath '%s' -Recurse -Force -ErrorAction SilentlyContinue"):format(path:gsub("'", "''")) }, {
 			timeout = 120000,
 		})
 		return
 	end
-	util.system({ "sh", "-lc", ("rm -rf %q"):format(path) }, { timeout = 120000 })
+	util.await_system({ "sh", "-lc", ("rm -rf %q"):format(path) }, { timeout = 120000 })
 end
 
-local function replace_dir_atomic(from_dir, to_dir)
+local function await_replace_dir_atomic(from_dir, to_dir)
 	-- Best-effort atomic replace: move old aside, move new in.
 	local backup = to_dir .. ".bak"
-	rm_rf(backup)
+	await_rm_rf(backup)
 
 	local had_old = util.is_dir(to_dir)
 	if had_old then
@@ -291,7 +292,7 @@ local function replace_dir_atomic(from_dir, to_dir)
 		)
 	end
 
-	rm_rf(backup)
+	await_rm_rf(backup)
 	return true
 end
 
@@ -371,13 +372,23 @@ local function validate_manifest(manifest)
 	return true
 end
 
-local function do_install(opts, force)
+local function noop() end
+
+local TOTAL_STEPS = 4
+
+local function step_msg(n, msg)
+	return ("[%d/%d] %s"):format(n, TOTAL_STEPS, msg)
+end
+
+-- Runs inside a coroutine. Returns (status, err).
+local function do_install_co(opts, force, on_progress)
 	local install_dir = opts.install_dir
 	local vstuc_dir = default_vstuc_dir(install_dir)
 
 	if not force then
 		local s = M.status(opts)
 		if s.installed then
+			on_progress("done", "already installed")
 			return s
 		end
 	end
@@ -385,7 +396,7 @@ local function do_install(opts, force)
 	ensure_dir(install_dir)
 	local tmp_root = util.joinpath(tmp_dir(install_dir), "vstuc")
 	-- Always start from a clean temp directory.
-	rm_rf(tmp_root)
+	await_rm_rf(tmp_root)
 	tmp_root = ensure_dir(tmp_root)
 
 	local pkg_name = util.is_windows() and "vstuc.zip" or "vstuc.vsix"
@@ -393,16 +404,19 @@ local function do_install(opts, force)
 	local extract_root = util.joinpath(tmp_root, "extract")
 	local stage_dir = util.joinpath(tmp_root, "stage")
 
-	local downloaded, err = download_file(opts.download_url, pkg_path)
+	on_progress("download", step_msg(1, "Downloading vstuc package..."))
+	local downloaded, err = await_download_file(opts.download_url, pkg_path)
 	if not downloaded then
 		return nil, err
 	end
 
-	local extracted, unzip_err = unzip_package(pkg_path, extract_root)
+	on_progress("unzip", step_msg(2, "Extracting package..."))
+	local extracted, unzip_err = await_unzip_package(pkg_path, extract_root)
 	if not extracted then
 		return nil, unzip_err
 	end
 
+	on_progress("validate", step_msg(3, "Validating files..."))
 	-- VSIX usually contains an extension root; we keep the whole extracted tree and discover DLLs.
 	ensure_dir(stage_dir)
 	-- Move extracted into stage to make replace_dir_atomic easy.
@@ -438,8 +452,8 @@ local function do_install(opts, force)
 		)
 	end
 
-	local ok, write_err = pcall(write_manifest, final_stage_dir, manifest)
-	if not ok then
+	local write_ok, write_err = pcall(write_manifest, final_stage_dir, manifest)
+	if not write_ok then
 		return nil, make_error(
 			"permissions",
 			"manifest",
@@ -449,8 +463,9 @@ local function do_install(opts, force)
 		)
 	end
 
+	on_progress("replace", step_msg(4, "Installing into final location..."))
 	-- Replace final directory atomically
-	local replaced, replace_err = replace_dir_atomic(final_stage_dir, vstuc_dir)
+	local replaced, replace_err = await_replace_dir_atomic(final_stage_dir, vstuc_dir)
 	if not replaced then
 		return nil, replace_err
 	end
@@ -461,8 +476,8 @@ local function do_install(opts, force)
 	if not final_ok then
 		return nil, final_validate_err
 	end
-	local write_ok, final_write_err = pcall(write_manifest, vstuc_dir, final_manifest)
-	if not write_ok then
+	local final_write_ok, final_write_err = pcall(write_manifest, vstuc_dir, final_manifest)
+	if not final_write_ok then
 		return nil, make_error(
 			"permissions",
 			"manifest",
@@ -473,17 +488,40 @@ local function do_install(opts, force)
 	end
 
 	-- Clean up tmp content after a successful install.
-	rm_rf(tmp_root)
+	await_rm_rf(tmp_root)
 
+	on_progress("done", "Installed")
 	return M.status(opts)
 end
 
-function M.install(opts)
-	return do_install(opts, false)
+local function spawn_install(opts, force, on_progress, on_done)
+	on_progress = on_progress or noop
+	on_done = on_done or noop
+
+	local co = coroutine.create(function()
+		local ok, status, err = xpcall(function()
+			return do_install_co(opts, force, on_progress)
+		end, debug.traceback)
+		if not ok then
+			-- xpcall propagates traceback string in `status` slot
+			on_done(nil, make_error("internal", "install", "unexpected error", "please report this issue", tostring(status)))
+		else
+			on_done(status, err)
+		end
+	end)
+
+	local ok, err = coroutine.resume(co)
+	if not ok then
+		on_done(nil, make_error("internal", "install", "failed to start install", "please report this issue", tostring(err)))
+	end
 end
 
-function M.update(opts)
-	return do_install(opts, true)
+function M.install_async(opts, on_progress, on_done)
+	spawn_install(opts, false, on_progress, on_done)
+end
+
+function M.update_async(opts, on_progress, on_done)
+	spawn_install(opts, true, on_progress, on_done)
 end
 
 return M

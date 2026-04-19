@@ -1,9 +1,9 @@
 vim.api.nvim_create_user_command("NvimDapUnityInstall", function()
-	require("nvim-dap-unity").install()
+	require("nvim-dap-unity").install_async()
 end, {})
 
 vim.api.nvim_create_user_command("NvimDapUnityUpdate", function()
-	require("nvim-dap-unity").update()
+	require("nvim-dap-unity").update_async()
 end, {})
 
 vim.api.nvim_create_user_command("NvimDapUnityStatus", function()

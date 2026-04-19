@@ -78,9 +78,9 @@ function M.setup(opts)
 
 	if state.opts.auto_install_on_start and not s.installed then
 		vim.schedule(function()
-			-- Auto-install on start (may take a while on first run).
+			-- Auto-install on start — non-blocking, progress shown via vim.notify.
 			if not state.installing then
-				M.install()
+				M.install_async()
 			end
 		end)
 	end
@@ -138,38 +138,108 @@ local function after_success(status, verb)
 	return status
 end
 
-function M.install()
-	if state.installing then
-		vim.notify("nvim-dap-unity install already running", vim.log.levels.INFO)
-		return nil
+-- Build a progress reporter that reuses one notification slot when the
+-- backend supports it (nvim-notify: `replace`; snacks.notify: `id`). Plain
+-- vim.notify falls back to multiple lines, which is acceptable.
+local function make_progress_reporter()
+	local notify_handle = nil
+	return function(_stage, message)
+		local opts = {
+			title = "nvim-dap-unity",
+			id = "nvim-dap-unity-install",
+		}
+		if notify_handle ~= nil then
+			opts.replace = notify_handle
+		end
+		local handle = vim.notify(message, vim.log.levels.INFO, opts)
+		if handle ~= nil then
+			notify_handle = handle
+		end
 	end
-	state.installing = true
-	ensure_opts()
-	local status, err = installer.install(state.opts)
-	state.installing = false
-	if not status then
-		local msg = set_last_error(err)
-		vim.notify("nvim-dap-unity install failed: " .. msg, error_level(err))
-		return nil
-	end
-	return after_success(status, "installed")
 end
 
-function M.update()
-	if state.updating then
-		vim.notify("nvim-dap-unity update already running", vim.log.levels.INFO)
-		return nil
+local VERB_INFO = {
+	install = { lock = "installing", past = "installed" },
+	update = { lock = "updating", past = "updated" },
+}
+
+local function run(verb, runner)
+	local info = VERB_INFO[verb]
+	if state[info.lock] then
+		vim.notify("nvim-dap-unity " .. verb .. " already running", vim.log.levels.INFO)
+		return
 	end
-	state.updating = true
+	state[info.lock] = true
 	ensure_opts()
-	local status, err = installer.update(state.opts)
-	state.updating = false
-	if not status then
-		local msg = set_last_error(err)
-		vim.notify("nvim-dap-unity update failed: " .. msg, error_level(err))
-		return nil
+
+	local on_progress = make_progress_reporter()
+	on_progress(verb, "Starting " .. verb .. "...")
+
+	runner(state.opts, on_progress, function(status, err)
+		state[info.lock] = false
+		if not status then
+			local msg = set_last_error(err)
+			vim.notify("nvim-dap-unity " .. verb .. " failed: " .. msg, error_level(err))
+			return
+		end
+		after_success(status, info.past)
+	end)
+end
+
+-- Non-blocking install/update. Returns immediately; progress and result are
+-- delivered via vim.notify. Used by `:NvimDapUnityInstall/Update` and by the
+-- `auto_install_on_start` startup path so the UI is never frozen.
+function M.install_async()
+	run("install", installer.install_async)
+end
+
+function M.update_async()
+	run("update", installer.update_async)
+end
+
+-- Blocking install/update intended for use as a Lazy `build` hook, where the
+-- caller (Lazy) needs to know when the install actually finishes so its panel
+-- shows real progress. Uses vim.wait so the event loop keeps pumping — this is
+-- not a hard CPU block, vim.system callbacks still fire.
+local function run_sync(verb, runner, timeout_ms)
+	local info = VERB_INFO[verb]
+	if state[info.lock] then
+		vim.notify("nvim-dap-unity " .. verb .. " already running", vim.log.levels.INFO)
+		return false
 	end
-	return after_success(status, "updated")
+	state[info.lock] = true
+	ensure_opts()
+
+	local on_progress = make_progress_reporter()
+	on_progress(verb, "Starting " .. verb .. "...")
+
+	local done, ok_result = false, false
+	runner(state.opts, on_progress, function(status, err)
+		state[info.lock] = false
+		if not status then
+			set_last_error(err)
+			vim.notify(
+				"nvim-dap-unity " .. verb .. " failed: " .. format_error(err),
+				error_level(err)
+			)
+		else
+			after_success(status, info.past)
+			ok_result = true
+		end
+		done = true
+	end)
+
+	-- Default 5min timeout — vstuc download is the slow part.
+	vim.wait(timeout_ms or 300000, function() return done end, 100)
+	return ok_result
+end
+
+function M.install(timeout_ms)
+	return run_sync("install", installer.install_async, timeout_ms)
+end
+
+function M.update(timeout_ms)
+	return run_sync("update", installer.update_async, timeout_ms)
 end
 
 

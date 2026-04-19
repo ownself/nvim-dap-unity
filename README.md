@@ -51,7 +51,7 @@ return {
     {
       "ownself/nvim-dap-unity",
       build = function()
-        -- make sure adapter to be installed properly
+        -- To install the vstuc during installation via lazy.nvim
         require("nvim-dap-unity").install()
       end,
     },
@@ -106,9 +106,22 @@ require("nvim-dap-unity").setup({
 
 ### Commands
 
-- `:NvimDapUnityInstall` — Install/repair `vstuc`
-- `:NvimDapUnityUpdate` — Force reinstall/update
+- `:NvimDapUnityInstall` — Install/repair `vstuc` (non-blocking)
+- `:NvimDapUnityUpdate` — Force reinstall/update (non-blocking)
 - `:NvimDapUnityStatus` — Show status, paths, and dependency checks
+
+### Async install & progress
+
+Install and update run asynchronously via Neovim's libuv event loop, so the UI is never frozen. Progress is reported through `vim.notify` in four steps: `Downloading → Extracting → Validating → Installing`. If you have [nvim-notify](https://github.com/rcarriga/nvim-notify) or [snacks.nvim](https://github.com/folke/snacks.nvim) installed, the notifications are updated in place; with the bare `vim.notify` you'll get one notification per step.
+
+For programmatic use:
+
+| API | Behavior |
+|---|---|
+| `require("nvim-dap-unity").install(timeout_ms?)` | **Blocking.** Waits until install completes. Intended for Lazy's `build` hook so its panel reflects real progress. Default timeout: 5 minutes. Returns `true` on success. Old configs that already call `install()` from `build` keep working unchanged. |
+| `require("nvim-dap-unity").update(timeout_ms?)` | Blocking variant of update. |
+| `require("nvim-dap-unity").install_async()` | **Non-blocking.** Returns immediately; result delivered via `vim.notify`. Used by `:NvimDapUnityInstall` and `auto_install_on_start`. Call this from runtime contexts where you must not freeze the UI. |
+| `require("nvim-dap-unity").update_async()` | Non-blocking variant of update. |
 
 ### Test
 
@@ -169,6 +182,7 @@ return {
     {
       "ownself/nvim-dap-unity",
       build = function()
+        -- 在使用lazy安装插件时一同下载并安装vstuc
         require("nvim-dap-unity").install()
       end,
     },
@@ -223,9 +237,22 @@ require("nvim-dap-unity").setup({
 
 ### 命令
 
-- `:NvimDapUnityInstall`：安装/修复适配器
-- `:NvimDapUnityUpdate`：强制重装/更新
+- `:NvimDapUnityInstall`：安装/修复适配器（非阻塞）
+- `:NvimDapUnityUpdate`：强制重装/更新（非阻塞）
 - `:NvimDapUnityStatus`：查看安装状态、关键路径与依赖检查
+
+### 异步安装与进度提示
+
+安装与更新基于 Neovim 的 libuv 事件循环异步执行，过程中 UI 不会被冻结。进度通过 `vim.notify` 以四步形式播报：`下载 → 解压 → 校验 → 安装`。如果你装了 [nvim-notify](https://github.com/rcarriga/nvim-notify) 或 [snacks.nvim](https://github.com/folke/snacks.nvim)，多条通知会被原地刷新；使用裸 `vim.notify` 则会逐条出现。
+
+如需在脚本中调用：
+
+| API | 行为 |
+|---|---|
+| `require("nvim-dap-unity").install(timeout_ms?)` | **阻塞**直到安装完成。专为 Lazy 的 `build` 钩子设计，保证 Lazy 面板能正确反映安装进度。默认超时 5 分钟，成功返回 `true`。已经写了 `build = function() ... install() end` 的老配置无需改动。 |
+| `require("nvim-dap-unity").update(timeout_ms?)` | `update` 的阻塞版本。 |
+| `require("nvim-dap-unity").install_async()` | **非阻塞**，调用后立即返回，结果通过 `vim.notify` 报告。`:NvimDapUnityInstall` 和 `auto_install_on_start` 走这条。在不能冻结 UI 的运行时上下文中使用。 |
+| `require("nvim-dap-unity").update_async()` | `update` 的非阻塞版本。 |
 
 ### 测试
 
