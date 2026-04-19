@@ -11,9 +11,13 @@ vim.api.nvim_create_user_command("NvimDapUnityStatus", function()
 	local lines = {
 		("installed: %s"):format(tostring(s.installed)),
 		("install_dir: %s"):format(tostring(s.install_dir)),
-		("vstuc_version: %s"):format(tostring(s.vstuc_version)),
+		("vstuc_version (requested): %s"):format(tostring(s.vstuc_version)),
+		("vstuc_version (installed): %s"):format(tostring(s.installed_version or "unknown")),
 		("download_url: %s"):format(tostring(s.download_url)),
 	}
+	if s.legacy then
+		table.insert(lines, "note: install detected at legacy path; will migrate on next install/update")
+	end
 	if s.bin_dir then
 		table.insert(lines, ("bin_dir: %s"):format(tostring(s.bin_dir)))
 	end

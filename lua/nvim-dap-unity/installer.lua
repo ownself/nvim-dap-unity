@@ -114,6 +114,33 @@ local function find_files_recursive(root, filename)
 	return results
 end
 
+-- Locate the extension's package.json inside the extracted VSIX. Prefers the
+-- shallowest match so we pick `extension/package.json` over deeper hits like
+-- `extension/node_modules/<dep>/package.json`.
+local function find_package_meta(extracted_dir)
+	local matches = find_files_recursive(extracted_dir, "package.json")
+	if #matches == 0 then
+		return nil
+	end
+	table.sort(matches, function(a, b) return #a < #b end)
+
+	local content = util.read_file(matches[1])
+	if not content or content == "" then
+		return nil
+	end
+	local ok, decoded = pcall(util.json_decode, content)
+	if not ok or type(decoded) ~= "table" then
+		return nil
+	end
+
+	return {
+		name = decoded.name,
+		version = decoded.version,
+		publisher = decoded.publisher,
+		display_name = decoded.displayName,
+	}
+end
+
 local function read_manifest(vstuc_dir)
 	local path = manifest_path(vstuc_dir)
 	local content = util.read_file(path)
@@ -360,6 +387,8 @@ local function build_manifest(opts, install_dir, extracted_dir)
 		installed_at = now_iso(),
 		source_url = opts.download_url,
 		install_dir = install_dir,
+		requested_version = opts.vstuc_version,
+		package = find_package_meta(extracted_dir),
 		files = files,
 	}
 	manifest.bin_dir = bin_dir_from_files(files)
@@ -402,12 +431,22 @@ local function do_install_co(opts, force, on_progress)
 	local install_dir = opts.install_dir
 	local vstuc_dir = default_vstuc_dir(install_dir)
 
+	local s = M.status(opts)
 	if not force then
-		local s = M.status(opts)
 		-- Legacy installs report installed=true but live at the old path;
 		-- proceed with the install so they get migrated to opts.install_dir.
 		if s.installed and not s.legacy then
 			on_progress("done", "already installed")
+			return s
+		end
+	elseif force and opts.vstuc_version and opts.vstuc_version ~= "" and opts.vstuc_version ~= "latest" then
+		-- For pinned versions we can short-circuit when the local install already
+		-- matches; "latest" still has to round-trip because we don't query the
+		-- marketplace API for the resolved version.
+		local installed_version = s.installed and not s.legacy
+			and s.manifest and s.manifest.package and s.manifest.package.version
+		if installed_version == opts.vstuc_version then
+			on_progress("done", "already at version " .. opts.vstuc_version)
 			return s
 		end
 	end
@@ -454,6 +493,23 @@ local function do_install_co(opts, force, on_progress)
 	local ok, validate_err = validate_manifest(manifest)
 	if not ok then
 		return nil, validate_err
+	end
+
+	-- Late short-circuit: when force=true and the freshly downloaded package
+	-- carries the same version as the local install, skip the directory replace.
+	-- Network was already spent (we'd need a marketplace API call to skip the
+	-- download itself), but we avoid touching the live install dir, preserve the
+	-- original installed_at timestamp, and give the user an honest "no change"
+	-- message instead of a misleading "updated".
+	if force and not s.legacy and s.installed
+		and s.manifest and s.manifest.package and s.manifest.package.version
+		and manifest.package and manifest.package.version
+		and s.manifest.package.version == manifest.package.version
+	then
+		await_rm_rf(tmp_root)
+		on_progress("done", "already at latest (" .. tostring(manifest.package.version) .. ")")
+		s.no_change = true
+		return s
 	end
 
 	-- Write manifest into stage content directory (final location will be vstuc_dir)

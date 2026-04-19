@@ -137,7 +137,12 @@ local function after_success(status, verb)
 	if state.opts.auto_setup_dap then
 		dap_integration.setup(state.opts, status)
 	end
-	vim.notify("nvim-dap-unity " .. verb, vim.log.levels.INFO)
+	-- When the install/update was a no-op (already at latest), the progress
+	-- reporter has already shown an honest message — don't follow it with a
+	-- misleading "updated" notify.
+	if not status.no_change then
+		vim.notify("nvim-dap-unity " .. verb, vim.log.levels.INFO)
+	end
 	return status
 end
 
@@ -251,6 +256,7 @@ function M.status()
 	local status = installer.status(state.opts)
 	status.download_url = state.opts.download_url
 	status.vstuc_version = state.opts.vstuc_version
+	status.installed_version = status.manifest and status.manifest.package and status.manifest.package.version or nil
 	status.last_error = state.last_error
 	status.dap = {
 		auto_install_on_start = state.opts.auto_install_on_start,
