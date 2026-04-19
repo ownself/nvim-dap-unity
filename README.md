@@ -88,7 +88,7 @@ require("nvim-dap-unity").setup({
   download_url = nil, -- if set, overrides vstuc_version URL
 
   -- Install location
-  install_dir = nil, -- default: stdpath('data')/lazy/nvim-dap-unity (when lazy detected)
+  install_dir = nil, -- default: stdpath('data')/nvim-dap-unity
 
   -- Behavior
   auto_install_on_start = false, -- default: auto install if missing
@@ -219,7 +219,7 @@ require("nvim-dap-unity").setup({
   download_url = nil, -- 若设置则优先使用该 URL
 
   -- 安装目录
-  install_dir = nil, -- 默认：检测到 lazy 时为 stdpath('data')/lazy/nvim-dap-unity
+  install_dir = nil, -- 默认：stdpath('data')/nvim-dap-unity
 
   -- 行为
   auto_install_on_start = false, -- 默认：首次启动若未安装则自动安装

@@ -296,21 +296,7 @@ local function await_replace_dir_atomic(from_dir, to_dir)
 	return true
 end
 
-function M.status(opts)
-	local install_dir = opts.install_dir
-	local vstuc_dir = default_vstuc_dir(install_dir)
-	local manifest = read_manifest(vstuc_dir)
-	if not manifest then
-		return {
-			installed = false,
-			install_dir = install_dir,
-			vstuc_dir = vstuc_dir,
-			bin_dir = nil,
-			missing = { "manifest.json" },
-			manifest = nil,
-		}
-	end
-
+local function build_status(install_dir, vstuc_dir, manifest, legacy)
 	local missing = validate_required_files(manifest)
 	local bin_dir = nil
 	if manifest.files then
@@ -324,6 +310,37 @@ function M.status(opts)
 		bin_dir = bin_dir,
 		missing = missing,
 		manifest = manifest,
+		legacy = legacy or nil,
+	}
+end
+
+function M.status(opts)
+	local install_dir = opts.install_dir
+	local vstuc_dir = default_vstuc_dir(install_dir)
+	local manifest = read_manifest(vstuc_dir)
+	if manifest then
+		return build_status(install_dir, vstuc_dir, manifest, false)
+	end
+
+	-- Read-only fallback: older versions of this plugin installed under
+	-- stdpath('data')/lazy/nvim-dap-unity/. Use that install if present so
+	-- existing users don't have to re-download. Future installs/updates always
+	-- write to opts.install_dir, which lets the legacy copy decay naturally.
+	for _, legacy_dir in ipairs(opts.legacy_install_dirs or {}) do
+		local legacy_vstuc = default_vstuc_dir(legacy_dir)
+		local legacy_manifest = read_manifest(legacy_vstuc)
+		if legacy_manifest and #validate_required_files(legacy_manifest) == 0 then
+			return build_status(legacy_dir, legacy_vstuc, legacy_manifest, true)
+		end
+	end
+
+	return {
+		installed = false,
+		install_dir = install_dir,
+		vstuc_dir = vstuc_dir,
+		bin_dir = nil,
+		missing = { "manifest.json" },
+		manifest = nil,
 	}
 end
 
@@ -387,7 +404,9 @@ local function do_install_co(opts, force, on_progress)
 
 	if not force then
 		local s = M.status(opts)
-		if s.installed then
+		-- Legacy installs report installed=true but live at the old path;
+		-- proceed with the install so they get migrated to opts.install_dir.
+		if s.installed and not s.legacy then
 			on_progress("done", "already installed")
 			return s
 		end

@@ -7,7 +7,7 @@ local M = {}
 local defaults = {
 	vstuc_version = "latest",	-- marketplace version or "latest"
 	download_url = nil,	-- if set, overrides vstuc_version URL
-	install_dir = nil,	-- base dir (default: stdpath('data')/lazy/nvim-dap-unity when lazy detected)
+	install_dir = nil,	-- base dir (default: stdpath('data')/nvim-dap-unity)
 	auto_setup_dap = true,	-- inject dap adapter if possible
 	auto_install_on_start = false,	-- auto install vstuc if missing
 	add_default_cs_configuration = false,	-- force: append dap.configurations.cs template
@@ -27,16 +27,17 @@ local state = {
 
 local function resolve_install_dir(opts)
 	if opts.install_dir and opts.install_dir ~= "" then
-		return opts.install_dir
+		return opts.install_dir, {}
 	end
 
 	local data = util.stdpath_data()
-	local lazy_root = util.joinpath(data, "lazy")
-	if util.is_dir(lazy_root) then
-		return util.joinpath(lazy_root, "nvim-dap-unity")
-	end
-
-	return util.joinpath(data, "nvim-dap-unity")
+	local primary = util.joinpath(data, "nvim-dap-unity")
+	-- Older versions of this plugin defaulted to the Lazy plugin directory when
+	-- detected. We no longer write there (Lazy's git operations can wipe the
+	-- subdir), but fall back to reading it so existing users don't have to
+	-- re-download until their next :NvimDapUnityUpdate.
+	local legacy = { util.joinpath(data, "lazy", "nvim-dap-unity") }
+	return primary, legacy
 end
 
 local function build_download_url(opts)
@@ -62,7 +63,9 @@ local function normalize_opts(opts)
 	end
 
 	opts.download_url = build_download_url(opts)
-	opts.install_dir = resolve_install_dir(opts)
+	local primary, legacy = resolve_install_dir(opts)
+	opts.install_dir = primary
+	opts.legacy_install_dirs = legacy
 	return opts
 end
 
