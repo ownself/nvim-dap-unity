@@ -53,6 +53,42 @@ local function find_unity_project_root()
 	end
 end
 
+local function endpoint_from_process(process)
+	if type(process) ~= "table" then
+		return nil
+	end
+	-- Asset import workers and other headless helpers are reported alongside the
+	-- real Editor; attaching to one of those is never what the user wants.
+	if process.isBackground ~= false then
+		return nil
+	end
+	if process.isValidForAttachment == false then
+		return nil
+	end
+	if not process.address or not process.debuggerPort then
+		return nil
+	end
+	return tostring(process.address) .. ":" .. tostring(process.debuggerPort)
+end
+
+-- The probe speaks JSON-RPC, so targets live under params.processes. Older
+-- assumptions about a bare array are still honoured.
+local function endpoint_from_targets(decoded)
+	local processes = decoded.params and decoded.params.processes
+	if type(processes) ~= "table" then
+		processes = decoded
+	end
+
+	for _, process in pairs(processes) do
+		local endpoint = endpoint_from_process(process)
+		if endpoint then
+			return endpoint
+		end
+	end
+
+	return nil
+end
+
 local function parse_probe_stdout(stdout)
 	stdout = stdout or ""
 	if stdout == "" then
@@ -64,12 +100,9 @@ local function parse_probe_stdout(stdout)
 		if line ~= "" then
 			local ok, decoded = pcall(vim.json.decode, line)
 			if ok and type(decoded) == "table" then
-				for _, p in pairs(decoded) do
-					if type(p) == "table" and p.isBackground == false then
-						if p.address and p.debuggerPort then
-							return tostring(p.address) .. ":" .. tostring(p.debuggerPort)
-						end
-					end
+				local endpoint = endpoint_from_targets(decoded)
+				if endpoint then
+					return endpoint
 				end
 			elseif line:match("^%S+:%d+$") then
 				return line
@@ -85,23 +118,81 @@ end
 -- Returns (endpoint, nil) on success, (nil, system_result) on failure.
 local function probe_endpoint(probe_path)
 	local co = coroutine.running()
-	local res
-	if co then
-		util.system_async({ "dotnet", probe_path }, { timeout = PROBE_TIMEOUT_MS }, function(r)
-			coroutine.resume(co, r)
+	local state = { buffer = "", done = false }
+	local proc
+
+	local function finish(endpoint, err)
+		if state.done then
+			return
+		end
+		state.done = true
+		state.endpoint = endpoint
+		state.err = err
+
+		if proc then
+			pcall(function()
+				proc:kill(15)
+			end)
+		end
+
+		if co and coroutine.status(co) == "suspended" then
+			coroutine.resume(co)
+		end
+	end
+
+	local ok, err = pcall(function()
+		proc = vim.system({ "dotnet", probe_path }, {
+			text = true,
+			stdout = function(_, data)
+				if state.done or not data then
+					return
+				end
+				state.buffer = state.buffer .. data
+				local endpoint = parse_probe_stdout(state.buffer)
+				if endpoint ~= "" then
+					vim.schedule(function()
+						finish(endpoint)
+					end)
+				end
+			end,
+		}, function(res)
+			vim.schedule(function()
+				finish(nil, {
+					code = res.code or 1,
+					stdout = state.buffer,
+					stderr = res.stderr or "",
+				})
+			end)
 		end)
-		res = coroutine.yield()
+	end)
+
+	if not ok then
+		return nil, { code = 127, stdout = "", stderr = tostring(err) }
+	end
+
+	vim.defer_fn(function()
+		finish(nil, {
+			code = 124,
+			stdout = state.buffer,
+			stderr = ("no attachable Unity target within %dms"):format(PROBE_TIMEOUT_MS),
+		})
+	end, PROBE_TIMEOUT_MS)
+
+	if co then
+		if not state.done then
+			coroutine.yield()
+		end
 	else
-		res = util.system({ "dotnet", probe_path }, { timeout = PROBE_TIMEOUT_MS })
+		vim.wait(PROBE_TIMEOUT_MS + 500, function()
+			return state.done
+		end, 50)
 	end
-	if res.code ~= 0 then
-		return nil, res
+
+	if state.endpoint then
+		return state.endpoint
 	end
-	local endpoint = parse_probe_stdout(res.stdout)
-	if endpoint == "" then
-		return nil, res
-	end
-	return endpoint
+
+	return nil, state.err or { code = 1, stdout = state.buffer, stderr = "" }
 end
 
 function M.ensure_adapter(status)
@@ -191,7 +282,7 @@ function M.add_default_cs_configuration(status)
 			end
 
 			-- Fallback: scan listening ports on Linux when probe didn't yield a hit.
-			if not endpoint and not util.is_windows() then
+			if not endpoint and util.is_linux() then
 				local linux_ep = util.find_unity_endpoint_linux()
 				if linux_ep ~= "" then
 					endpoint = linux_ep
