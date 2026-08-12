@@ -1,9 +1,18 @@
 local M = {}
 
 local is_windows = vim.fn.has("win32") == 1 or vim.fn.has("win64") == 1
+local is_macos = vim.fn.has("mac") == 1
 
 function M.is_windows()
 	return is_windows
+end
+
+function M.is_macos()
+	return is_macos
+end
+
+function M.is_linux()
+	return not is_windows and not is_macos
 end
 
 function M.joinpath(...)
@@ -51,7 +60,13 @@ function M.system(cmd, opts)
 	opts = opts or {}
 	opts.text = true
 
-	local proc = vim.system(cmd, opts)
+	-- vim.system raises when the executable is missing, which would otherwise
+	-- abort callers that legitimately probe for optional tools.
+	local ok, proc = pcall(vim.system, cmd, opts)
+	if not ok then
+		return { code = 127, stdout = "", stderr = tostring(proc) }
+	end
+
 	local result = proc:wait(opts.timeout)
 	return normalize_system_output(result)
 end
@@ -131,7 +146,7 @@ end
 --- Unity typically listens on ports in the 56xxx range for debugging.
 --- @return string endpoint in "host:port" format, or empty string if not found
 function M.find_unity_endpoint_linux()
-	if M.is_windows() then
+	if not M.is_linux() then
 		return ""
 	end
 
